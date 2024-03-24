@@ -1,0 +1,50 @@
+#### Docker 점검
+# 샘플 이미지를 하나 받아서 컨테이너 실행해보도록 하겠습니다.
+# 컨테이너를 실행할 때 base이미지가 없으면 docker hub에서 기본 가지고 옵니다. 
+//mcr.microsoft.com/azuredocs/aci-helloworld
+sudo docker pull mcr.microsoft.com/azuredocs/aci-helloworld
+
+
+# 컨테이너확인
+# 이건 docker 호스트 위에 실행되고 있는 컨테이너
+sudo docker images
+docker ps #아직 구동은 안했음.
+
+# 샘플 앱 시작. 80 포트에 맵핑합니다.
+sudo docker run -d -p 8080:80 mcr.microsoft.com/azuredocs/aci-helloworld
+sudo docker run -d -p 8081:80 mcr.microsoft.com/azuredocs/aci-helloworld
+
+
+# 배포된 앱을 브라우저에서 확인합니다.
+20.36.166.114
+
+# nginx 앱 샘플을 하나더 배포해봅니다. 8080 포트에 맵핑합니다.
+# 8080으로 브라우저 접속. 접속 안됨. NSG 8080포트를 개방을 해줘야 됨, CTL+C종료했다가,, 다시 실행
+sudo docker run -d -p 8082:80 --restart=always nginx
+
+# 배포된 앱을 브라우저에서 확인합니다.
+20.36.166.114:8080
+
+# 확인 합니다.
+docker ps
+
+# docker 컨테이너를 중지합니다.
+docker stop <NAME>
+
+# 확인 -a 로 확인
+docker ps
+docker ps -a
+
+# 컨테이너 이미지 제거 - 컨테이너는 중지되어만 있고 로드해서 다시 시작할 수 있다.
+docker rm <NAME>
+
+# 레지스트리에서 이미지를 제거
+docker images
+docker rmi <NAME>
+
+#### Docker 정리명령
+# 모든 컨테이너, 이미지 제거
+sudo docker stop $(sudo docker ps -a -q)
+sudo docker rm $(sudo docker ps -a -q) -f
+sudo docker rmi $(sudo docker images -q) -f
+

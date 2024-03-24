@@ -1,0 +1,74 @@
+# 변수 정의
+AKSRG='aks-01-RG'
+LOCATION='eastus'
+AKSNAME='aks-01'
+
+# AKS 클러스터 연결
+az login
+az account list -o table
+az account set --subscription 77ccd0c7-9a35-4270-8890-ab585412e22b
+az aks get-credentials --resource-group $AKSRG --name $AKSNAME
+
+## AKS클러스터에 노드를 추가합니다. 
+## 현재 구성은 리소스가 살짝 부족하기 때문에, 
+## replica set를 늘리기 위해서 node를 추가 해둡니다. 노드는 가상머신을 추상화하는거라 시간이 조금 걸릴수 있습니다.
+az aks show --resource-group $AKSRG --name $AKSNAME --query agentPoolProfiles -o table
+az aks scale --resource-group $AKSRG --name $AKSNAME --node-count 2 --nodepool-name nodepool1
+
+## 개별 pod를 배포하는것과 다르게, 
+## deployment는 replica set을 사용하여 pod를 배포합니다.
+## spec에 어떤걸 배포할지에 대한 것을 정의하고 있고,
+## 파드가 시작될때 최소 리소스와
+## 이 파드가 사용할 수 있는 리소스 상한선을 설정하고 있습니다.
+## 오토스케일링을 사용하면 이 상한선 설정이 중요한 역할을 하게 됩니다.
+# nginx-deployment.yaml\
+----------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: mcr.microsoft.com/oss/nginx/nginx:1.15.2-alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 250m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+----------------------------------
+
+## deployment로 정의 된 deploymnet를 배포합니다. 이제 pod는 deployment 의 replica set에 의해 관리됩니다.
+kubectl apply -f nginx-deployment.yaml -n demo-namespace
+kubectl delete -f nginx-deployment.yaml -n demo-namespace
+
+
+## deployment 유효성 검사를 통해서, deployement, pod, replica set를 확인하도록 하구요.
+kubectl get deployments -n demo-namespace
+kubectl get pods -n demo-namespace
+kubectl get rs -n demo-namespace
+
+## 이번에는 deployment에서 사용되는 이미지를 변경해봅니다
+kubectl set image deployment/nginx-deployment nginx=nginx:1.16.1 -n demo-namespace
+
+## 이제 변경된 이미지를 확인해봅니다. 
+## 이미지는 변경된다기 보다는 
+## deployment에서 관리하는 pod가 
+## 새로 생성되어서 변경된 이미지를 사용하게 됩니다.
+kubectl describe pods nginx-deployment-5658f57f78-gzbzn -n demo-namespace
+
+
+

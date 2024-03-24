@@ -1,0 +1,50 @@
+#### Docker 머신 설치
+
+# Windows일 경우에는 Git bash에서 작업할것.
+
+# 리눅스 VM설치하기
+https://learn.microsoft.com/en-us/azure/developer/javascript/tutorial/nodejs-virtual-machine-vm/create-linux-virtual-machine-azure-cli
+az login
+az account list --output table
+
+# 리소스그룹만들기
+az group create --name waglcom99rg --location eastus
+
+# VM만들기
+az vm create \
+  --resource-group waglcom99rg \
+  --name waglcom99vm \
+  --location eastus \
+  --public-ip-sku Standard \
+  --image Ubuntu2204 \
+  --admin-username hahaysh \
+  --generate-ssh-keys
+
+# IP 체크
+az vm list-ip-addresses \
+  --resource-group waglcom99rg \
+  --name waglcom99vm
+
+# 포트 개방
+az vm open-port --resource-group waglcom99rg --name waglcom99vm --port 80 --priority 100
+az vm open-port --resource-group waglcom99rg --name waglcom99vm --port 8080 --priority 200
+az vm open-port --resource-group waglcom99rg --name waglcom99vm --port 8081 --priority 300
+az vm open-port --resource-group waglcom99rg --name waglcom99vm --port 8082 --priority 400
+
+# 모두 개방
+# az vm open-port --resource-group MyResourceGroup --name MyVm --port '*’
+
+# SSH
+ssh hahaysh@20.62.246.209
+
+
+
+#### Docker 설치
+# 도커 설치 후 확인
+sudo apt-get update
+sudo apt install docker.io
+sudo docker run -d -p 80:80 --restart=always nginx
+sudo docker ps
+sudo docker images  
+sudo docker rmi -f fce289e99eb9
+sudo docker rm -f 45116f5e79ef

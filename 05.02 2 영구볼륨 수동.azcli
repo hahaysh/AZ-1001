@@ -1,0 +1,124 @@
+# 변수설정
+AKSRG='aks-01-RG'
+LOCATION='eastus'
+AKSNAME='aks-01'
+STRNAME='aks01sta'
+FSNAME='aks-01fileshare'
+
+# 스토리지 계정 생성
+AKSRG=$(az aks show --resource-group $AKSRG --name $AKSNAME --query nodeResourceGroup -o tsv)
+echo $AKSRG
+az storage account create -n $STRNAME -g $AKSRG -l $LOCATION --sku Standard_LRS
+
+# 환경변수설정
+export AZURE_STORAGE_CONNECTION_STRING=$(az storage account show-connection-string -n $STRNAME -g $AKSRG -o tsv)
+echo $AZURE_STORAGE_CONNECTION_STRING
+
+# 파일 공유 만들기
+az storage share create -n $FSNAME --connection-string $AZURE_STORAGE_CONNECTION_STRING
+
+# 스토리지 키 가져오기
+STORAGE_KEY=$(az storage account keys list --resource-group $AKSRG --account-name $STRNAME --query "[0].value" -o tsv)
+echo $STORAGE_KEY
+
+# Kubernetes 시크릿 생성
+kubectl create secret generic azure-secret --from-literal=azurestorageaccountname=$STRNAME --from-literal=azurestorageaccountkey=$STORAGE_KEY -n demo-namespace
+kubectl get secret azure-secret -n demo-namespace
+
+#azurefiles-pv.yaml 파일 생성
+-----------------------------
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  annotations:
+    pv.kubernetes.io/provisioned-by: file.csi.azure.com
+  name: azurefile
+spec:
+  capacity:
+    storage: 5Gi
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: azurefile-csi
+  csi:
+    driver: file.csi.azure.com
+    volumeHandle: aks01sta_file  # make sure this volumeid is unique for every identical share in the cluster
+    volumeAttributes:
+      resourceGroup: resourceGroupName  # optional, only set this when storage account is not in the same resource group as node
+      shareName: aksshare
+    nodeStageSecretRef:
+      name: azure-secret
+      namespace: default
+  mountOptions:
+    - dir_mode=0777
+    - file_mode=0777
+    - uid=0
+    - gid=0
+    - mfsymlinks
+    - cache=strict
+    - nosharesock
+    - nobrl
+-----------------------------------------    
+
+
+# 영구 볼륨 생성
+kubectl create -f azurefiles-pv.yaml -n demo-namespace
+
+#azurefiles-mount-options-pvc.yaml
+-----------------------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azurefile
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: azurefile-csi
+  volumeName: azurefile
+  resources:
+    requests:
+      storage: 5Gi
+-----------------------------------------
+
+# 영구 볼륨 클레임 생성
+kubectl apply -f azurefiles-mount-options-pvc.yaml -n demo-namespace
+# 확인
+kubectl get PersistentVolumeClaim -n demo-namespace
+kubectl get pods -n demo-namespace
+
+kubectl delete pod nginx -n demo-namespace
+
+#PersistentVolume.yaml
+-----------------------------------------
+kind: Pod
+apiVersion: v1
+metadata:
+  name: nginx
+spec:
+  containers:
+    - name: myfrontend
+      image: mcr.microsoft.com/oss/nginx/nginx:1.15.5-alpine
+      volumeMounts:
+      - mountPath: "/mnt/azure"
+        name: volume
+  volumes:
+    - name: volume
+      persistentVolumeClaim:
+        claimName: azurefile
+-----------------------------------------
+
+# 다시 pod 배포
+kubectl apply -f PersistentVolume.yaml -n demo-namespace
+
+# 점검하기
+kubectl exec -it nginx -n demo-namespace -- sh
+cd /mnt/azure
+ls
+echo "hello aks" > test.txt
+
+##POD내에서 사용되고있는 TCP포트 모니터링 
+ifconfig
+netstat -an | grep tcp
+
+
+

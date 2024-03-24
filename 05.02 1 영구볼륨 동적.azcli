@@ -1,0 +1,89 @@
+# PertantVolumeClaim.yaml
+# Azure Disk
+-----------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azure-managed-disk
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: managed-premium
+  resources:
+    requests:
+      storage: 5Gi
+
+# pod 생성
+-----------------------
+kind: Pod
+apiVersion: v1
+metadata:
+  name: nginx
+spec:
+  containers:
+    - name: myfrontend
+      image: mcr.microsoft.com/oss/nginx/nginx:1.15.5-alpine
+      volumeMounts:
+      - mountPath: "/mnt/azure"
+        name: volume
+  volumes:
+    - name: volume
+      persistentVolumeClaim:
+        claimName: azure-managed-disk
+
+----------------------------
+
+## 따로 작업을 위한 namespace를 생성합니다.
+# 작업을 위한 namespace 생성
+kubectl get namespace
+kubectl create namespace demo-namespace
+
+## 비어있는지 확인하고 가겠습니다.
+# 다른 구성요소들도 확인
+kubectl get pods -n demo-namespace
+kubectl get PersistentVolumeClaim -n demo-namespace
+
+## 앞서 만들어둔 yaml파일을 배포해서 Kubernetes API를 이용한 동적 영구볼륨을 구성해봅니다.
+# yaml배포
+kubectl apply -f PersistentVolume.yaml -n demo-namespace
+
+## 혹시라도 문제가 있다면, 현재 상태를 확인해보도록 합니다. 상세한 사항을 점검하기에 도움이 될수도 있습니다.
+# 확인
+kubectl describe pods nginx -n demo-namespace
+kubectl describe PersistentVolumeClaim azure-managed-disk -n demo-namespace
+
+## 상황봐서 삭제도 하면 될것 같구요. 여기서 삭제하게 되면 실제 disk 도 삭제가 됩니다.
+# Delete a pod
+kubectl delete pod nginx -n demo-namespace
+kubectl delete PersistentVolumeClaim azure-managed-disk -n demo-namespace
+
+## 영구볼륨이 잘 붙었는지 확인을 한번 해보도록 하겠습니다.
+# 점검하기
+# Access a pod using sh
+kubectl exec -it nginx -n demo-namespace -- sh
+cd /mnt/azure
+ls
+echo "hello aks" > test.txt
+
+##POD내에서 사용되고있는 TCP포트 모니터링 
+ifconfig
+netstat -an | grep tcp
+
+# Azure Files
+-----------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azure-managed-azurefile
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: azurefile
+  resources:
+    requests:
+      storage: 5Gi
+
+-----------------------------
+
+
+

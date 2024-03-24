@@ -1,0 +1,35 @@
+# 변수 정의
+AKSRG='aks-01-RG'
+LOCATION='eastus'
+AKSNAME='aks-01'
+
+# AKS 클러스터 연결
+az login
+az account list -o table
+az account set --subscription 77ccd0c7-9a35-4270-8890-ab585412e22b
+az aks get-credentials --resource-group $AKSRG --name $AKSNAME
+
+## AKS를 생성할때, cluster autoscaler를 사용하도록 설정 할수 있습니다.
+## 최소노드1개 최대노드3개로 설정했구요.
+## [생성하지는 말고 참고로 공유]
+# cluster autoscaler를 사용하는 ask생성
+az aks create \
+    --resource-group myResourceGroup \
+    --name myAKSCluster \
+    --node-count 1 \
+    --vm-set-type VirtualMachineScaleSets \
+    --load-balancer-sku standard \
+    --enable-cluster-autoscaler \
+    --min-count 1 \
+    --max-count 3
+
+## 기존 AKS를 업데이트 할수도 있습니다.
+## 좀 전에 포탈에서 설정했던것과 마찬가지로 azure cli로도 설정할수 있습니다.
+## [포탈에서 설정했기 때문에 마찬가지로 실행하지 말고 공유]
+# 기존 AKS 업데이트 - enable-cluster-autoscaler
+az aks update \
+    --resource-group $AKSRG \
+    --name $AKSNAME \
+    --enable-cluster-autoscaler \
+    --min-count 1 \
+    --max-count 3

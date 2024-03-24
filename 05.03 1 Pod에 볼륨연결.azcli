@@ -1,0 +1,116 @@
+# 변수 정의
+AKSRG='aks-01-RG'
+LOCATION='eastus'
+AKSNAME='aks-01'
+
+# AKS 클러스터 연결
+az login
+az account list -o table
+az account set --subscription 77ccd0c7-9a35-4270-8890-ab585412e22b
+az aks get-credentials --resource-group $AKSRG --name $AKSNAME
+
+# 구성요소들을 정리하기 위한
+kubectl get pods -n demo-namespace
+kubectl get PersistentVolumeClaim -n demo-namespace
+kubectl get StorageClass -n demo-namespace
+kubectl delete StorageClass managed-premium-retain -n demo-namespace
+kubectl delete PersistentVolumeClaim azure-managed-disk -n demo-namespace
+kubectl delete pod nginx -n demo-namespace
+
+## 먼저 스토리지 계정의 프로비전을 위한 사용자 지정 스토리지 클래스를 정의합니다. 
+## provisioner: disk.csi.azure.com 부분은, 스토리지 볼륨을 동적으로 생성하는 역할을 하고, CSI는 Azure Disk 스토리지를 K8S에서 사용할수 있도록 해줍니다.
+# premium-storage-class.yaml
+-----------------------------
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: managed-premium-retain
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: Premium_LRS
+reclaimPolicy: Retain
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion:
+-----------------------------
+
+# 사용자 지정 클래스를 만듭니다.
+kubectl apply -f premium-storage-class.yaml -n demo-namespace
+kubectl describe StorageClass managed-premium-retain -n demo-namespace
+
+
+##그리고 영구볼륨을 요청합니다. 
+# persistent-volume-claim-5g.yaml
+-----------------------------
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: azure-managed-disk
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: managed-premium-retain
+  resources:
+    requests:
+      storage: 5Gi
+-----------------------------
+
+# 영구볼륨할당을 만듭니다.
+kubectl apply -f persistent-volume-claim-5g.yaml -n demo-namespace
+kubectl describe PersistentVolumeClaim azure-managed-disk -n demo-namespace
+
+## 이제 pod를 만들어서 영구볼륨을 마운트 해봅니다. pod 자체는 그냥 보시면 될것 같구요, 볼륨이 정상적으로 잘 붙었는지 위주로 확인하면 될것 같습니다.
+# pod-with-storage-mount.yaml
+-----------------------------
+kind: Pod
+apiVersion: v1
+metadata:
+  name: nginx
+spec:
+  containers:
+    - name: myfrontend
+      image: mcr.microsoft.com/oss/nginx/nginx:1.15.5-alpine
+      volumeMounts:
+      - mountPath: "/mnt/azure"
+        name: volume
+  volumes:
+    - name: volume
+      persistentVolumeClaim:
+        claimName: azure-managed-disk
+-----------------------------
+
+##마지막으로 pod를 만들어서 영구볼륨을 마운트합니다. 동적볼륨이기 때문에 처음 요청시에 생성이 됩니다. 이제 포탈에서 확인할 수 있습니다.
+kubectl apply -f pod-with-storage-mount.yaml -n demo-namespace
+kubectl describe Pod nginx -n demo-namespace
+
+# 영구볼륨 확인
+kubectl get pods -n demo-namespace
+
+# 점검하기 동네파일 하나 생성
+kubectl exec -it nginx -n demo-namespace -- sh
+cd /mnt/azure
+ls
+echo "hello aks" > test.txt
+
+# nginx pod 삭제
+kubectl delete pod nginx -n demo-namespace
+
+# nginx pod 다시 생성
+kubectl apply -f pod-with-storage-mount.yaml -n demo-namespace
+
+# nginx pod 다시 점검
+kubectl exec -it nginx -n demo-namespace -- sh
+cd /mnt/azure
+ls
+
+# nginx pod 삭제
+kubectl delete pod nginx -n demo-namespace
+
+# 영구 볼륨 클레임을 나열하고 삭제
+kubectl get pvc -n demo-namespace
+kubectl delete pvc azure-managed-disk -n demo-namespace
+kubectl delete -f persist-volume-claim-5g.yaml -n demo-namespace
+
+# 스토리지 클래스를 나열하고 삭제
+kubectl get sc
+kubectl delete sc managed-premium-retain
+

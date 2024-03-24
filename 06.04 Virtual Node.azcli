@@ -1,0 +1,116 @@
+# 변수 정의
+AKSRG='aks-02-RG'
+LOCATION='eastus'
+AKSNAME='aks-02'
+
+# AKS 클러스터 연결
+az login
+az account list -o table
+az account set --subscription 77ccd0c7-9a35-4270-8890-ab585412e22b
+
+## Virtual Node 데모는 기존에 AKS에서 하지말고 새로만들어할것. 경우수를 줄이기 위해서
+# 리소스 그룹 생성
+az group create --name $AKSRG --location $LOCATION
+
+# 네트워크 생성
+az network vnet create \
+    --resource-group $AKSRG \
+    --name myVnet \
+    --address-prefixes 10.0.0.0/8 \
+    --subnet-name myAKSSubnet \
+    --subnet-prefix 10.240.0.0/16
+
+# virtual node를 위한 subnet 만들기
+az network vnet subnet create \
+    --resource-group $AKSRG \
+    --vnet-name myVnet \
+    --name myVirtualNodeSubnet \
+    --address-prefixes 10.241.0.0/16
+
+# 경로변환비활성화(aks생성시 꼭 필요한 옵션)
+export MSYS_NO_PATHCONV=1
+
+# AKS생성시 사용할 서브넷ID 가지고 오기
+SUBNETID=$(az network vnet subnet show --resource-group $AKSRG --vnet-name myVnet --name myAKSSubnet --query id -o tsv)
+echo $SUBNETID
+
+# AKS 클러스터 생성
+az aks create \
+    --resource-group $AKSRG \
+    --name $AKSNAME \
+    --node-count 3 \
+    --network-plugin azure \
+    --vnet-subnet-id $SUBNETID
+
+
+# 가상 노드를 사용하도록 설정(시간이 소요됨)
+az aks enable-addons --addons virtual-node --name $AKSNAME --resource-group $AKSRG --subnet-name myVirtualNodeSubnet
+
+# aks 자격증명 가져오기
+az aks get-credentials --resource-group $AKSRG --name $AKSNAME
+
+# vitual node 생성 확인
+kubectl get nodes
+
+## nodeSelector는 pod가 스케줄링될 노드를 선택하는데 사용되는 셀렉터입니다.
+## 특정 레이블을 가진 노드에서만 실행되도록 합니다.
+## 세번째 type 레이블은 virtual-kubelet인, 그러니까 virtual node에서 실행되도록 합니다.
+## tolerations도 파드를 특정한 노드에 스케줄링할 수 있도록 해주는 속성입니다.
+## 현재까자 Virtual Node의 제한 사항은 ACR에 이미지를 사용하는 경우에
+## Kubernetes Secret을 사용해야 한다는 건데요, 
+## Virtual Node는 현재 Microsof Entra 의 서비스주체 인증을 사용할 수 없습니다.
+# virtual-node.yaml
+-------------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aci-helloworld
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aci-helloworld
+  template:
+    metadata:
+      labels:
+        app: aci-helloworld
+    spec:
+      containers:
+      - name: aci-helloworld
+        image: mcr.microsoft.com/azuredocs/aci-helloworld
+        ports:
+        - containerPort: 80
+      nodeSelector:
+        kubernetes.io/role: agent
+        kubernetes.io/os: linux
+        type: virtual-kubelet
+      tolerations:
+      - key: virtual-kubelet.io/provider
+        operator: Exists
+      - key: azure.com/aci
+        effect: NoSchedule
+-------------------------------------------
+
+# virtual node 에 deployment 생성
+kubectl apply -f virtual-node.yaml
+
+## virtual node기 잘 실행되는 지 확인해보구요, STATUS가 Running이면 정상입니다.
+## pod가 할당받은 ip가 virtual node 서브넷의 ip인지도 확인합니다.
+# virtual node pod 확인
+kubectl get pods -o wide
+
+## Virtual Node가 잘 작동하는지 확인 해봅니다.
+## virtual node에 데모 애플리케이션을 테스트해 보구요,
+## Pod에는 내부 IP 주소가 할당되기 때문에
+## AKS 클러스터의 다른 Pod에서 연결을 빠르게 테스트할 수 있습니다.
+# 테스트 pod만들고 바로 터미널 세션으로 연결
+kubectl run -it --rm testvk --image=mcr.microsoft.com/dotnet/runtime-deps:6.0
+
+## apt-get을 사용하여 Pod에 curl을 설치합니다.
+# curl설치
+apt-get update && apt-get install -y curl
+
+## Curl을 사용해서 Pod 주소에 액세스합니다. 
+## 이전 kubectl get pods 명령에서 표시된 IP로 접근해봅니다.
+curl -L http://10.241.0.4
+

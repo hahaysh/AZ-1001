@@ -1,0 +1,44 @@
+#### ACR로 이미지 배포
+# ACR 로 이미지 배포(포탈에서 만들어 본다)
+# Docker머신에 Azure CLI설치
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+az login
+az account list --output table
+az account set -s 77ccd0c7-9a35-4270-8890-ab585412e22b
+
+# az group create --name waglcom99rg --location eastus
+az acr create --resource-group waglcom99rg --name waglcom99acr --sku Basic
+
+# 로그인방법 (계정과 비번 복사해둔다)
+az acr update --name waglcom99acr --admin-enabled true
+az acr credential show --name waglcom99acr --query "passwords[0].value"
+
+# 확인
+sudo docker login waglcom99acr.azurecr.io
+az acr repository list --name waglcom99acr --output table
+
+# 이미지 가지고 pull/tag/push
+sudo docker images
+sudo docker pull mcr.microsoft.com/azuredocs/aci-helloworld
+sudo docker tag mcr.microsoft.com/azuredocs/aci-helloworld waglcom99acr.azurecr.io/hello-world:v1
+sudo docker images
+sudo docker push waglcom99acr.azurecr.io/hello-world:v1
+
+# 확인
+az acr repository list --name waglcom99acr --output table
+az acr repository show-tags --name waglcom99acr --repository hello-world --output table
+az acr repository show -n waglcom99acr -t hello-world:v1
+
+# 로컬에서 실행
+sudo docker run -p 80:80 -d --name hello-world waglcom99acr.azurecr.io/hello-world:v1
+
+# 모든 컨테이너, 이미지 제거
+sudo docker stop $(sudo docker ps -a -q)
+sudo docker rm $(sudo docker ps -a -q) -f
+sudo docker rmi $(sudo docker images -q) -f
+
+# ACR Task로 컨테이너 이미지 빌드/배포
+cd acr-build-helloworld-node
+az acr build --registry waglcom99acr --image helloacrtasks:v1 .
+
+

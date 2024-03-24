@@ -1,0 +1,94 @@
+# 변수 정의
+AKSRG='aks-01-RG'
+LOCATION='eastus'
+AKSNAME='aks-01'
+
+# AKS 클러스터 연결
+az login
+az account list -o table
+az account set --subscription 77ccd0c7-9a35-4270-8890-ab585412e22b
+az aks get-credentials --resource-group $AKSRG --name $AKSNAME
+
+## 먼저 수동으로 pod의 크기를 조정해보겠습니다.
+## 우선 기존의 리소스들을 검토차원에서 확인을 먼저 합니다.
+## pod랑 deployment를 확인하겠습니다.
+## 현재 설정된 replica 수를 확인할 수 있습니다.
+# 구성요소들 확인
+kubectl get pods -n demo-namespace
+kubectl get deployment -n demo-namespace
+kubectl delete pod nginx -n demo-namespace
+
+## 이제 replica 수를 늘려보겠습니다.
+## scale 명령어를 사용하여 replica 수를 늘릴 수 있습니다.
+## 늘어난것을 확인할수 있습니다.
+# replica 수 늘리기
+kubectl scale --replicas=3 deployment/nginx-deployment -n demo-namespace
+kubectl get deployment -n demo-namespace
+
+
+## 이제는 자동을 조정을 해봅니다.
+## 우선 자동 조정을 위해서 HPA를 사용하기 위해서는 
+## cpu나 memory에 대한 제한이 설정되어 있어야 합니다.
+## 앞서 배포한 nginx-deployment.yaml파일을 열어보면,
+## 지정된 요청과 제한이 설정되어 있는것을 확인할 수 있습니다.
+# nginx-deployment.yaml
+---------------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: mcr.microsoft.com/oss/nginx/nginx:1.15.2-alpine
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 250m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+
+---------------------------------------
+
+## 이번에는 자동크기조정과 리소스를 제한을 정의하는 매니페스트 파일을 하나 만듭니다.
+## kind는 HPA로 설정하구요,
+## spec에는 replica 최대값, 최소값을 설정하고
+## 타켓 사용률을 설정합니다.
+## deployment에서 앞서 우리가 만든 nginx-deployment를 참조하도록 설정합니다.
+# aks-hpa.yaml
+---------------------------------------
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aks-hpa
+spec:
+  maxReplicas: 10 # define max replica count
+  minReplicas: 3  # define min replica count
+  targetCPUUtilizationPercentage: 50 # target CPU utilization
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx-deployment
+---------------------------------------
+
+## 이제 HPA 매니페스트를 적용합니다.
+## 잘만들어진것을 확인하고, 현재 설정값들도 확인합니다.
+## 부하를 줘서 확인을 해보면 좋겠으니,,, 
+## 부하를 주는 환경까지는 스텝이 많아서 설정하는것까지 확인하도록 하겠습니다.
+# HPA 생성
+kubectl apply -f aks-hpa.yaml -n demo-namespace
+kubectl get HorizontalPodAutoscaler -n demo-namespace
+
+
