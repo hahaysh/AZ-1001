@@ -37,8 +37,6 @@ az vm open-port --resource-group waglcom99rg --name waglcom99vm --port 8082 --pr
 # SSH
 ssh hahaysh@20.62.246.209
 
-
-
 #### Docker 설치
 # 도커 설치 후 확인
 sudo apt-get update

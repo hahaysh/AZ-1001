@@ -1,0 +1,179 @@
+#### Deploy an AKS cluster with Azure CLI
+## 항상 가장 먼저 Azure로그인을 먼저 합니다.
+## bash에 맞게 구성이 되어 있으니 Git bash로 작업합니다.
+
+# Azure 로그인
+az login
+az account list -o table
+az account set -s 77ccd0c7-9a35-4270-8890-ab585412e22b
+
+## 리소스 그룹을 먼저 생성하겠습니다.
+# 리소스 그룹 생성
+az group create --name waglcom99rg --location eastus
+
+## 관련리소스공급자도 등록을 해두겠습니다.
+# Provider register
+az provider register -n Microsoft.OperationsManagement
+az provider register -n Microsoft.OperationalInsights
+az provider register -n Microsoft.ContainerService
+
+## 그리고 az aks create 명령을 사용해서 AKS 클러스터를 만들겠습니다.
+## 이 예제는 노드 두개로 구성된 waglcom99aks이라는 클러스터를 생성합니다.
+## 모니터링 애드온을 활성화하고 SSH키를 생성하구요,
+## 노드는 Standard_D2_v4정도 사용하겠습니다.
+## 뒤쪽에 Azure portal에서 생성해보겠습니다.
+## [생성되는동안 Visual Studio Code에서 GitHub copilot에 대해서 설명할것.]
+# AKS 클러스터 생성
+Create AKS cluster 
+az aks create \
+    --resource-group waglcom99rg \
+    --name waglcom99aks \
+    --node-count 2 \
+    --enable-addons monitoring \
+    --generate-ssh-keys \
+    -s Standard_D2_v4
+
+
+## AKS클러스를 연결하기 위해서 kubectl 사용하기 위해서는
+## 먼저 az aks get-credentials 명령을 사용합니다. 
+## 이 명령은 자격증명을 다운로드해서 
+## kubectl command가 해당 자격 증명을 사용하도록 구성하는 역할을 하게 됩니다.
+## aks를 다루기 전에 항상 이 커맨드를 먼저 실행하도록 합니다.
+# AKS 클러스터 연결
+az aks get-credentials -g waglcom99rg -n waglcom99aks
+
+## AKS 클러스트를 관리하려면 Kubernetes CLI를 설치해야 합니다.
+## Azure Cloud Shell을 사용하는 경우에는 이미 kubectl이 설치되어 있구요,
+## 하지만 kubectl을 로컬에 사용하려면 설치를 해야 되구요,
+## 저는 현재 로컬에 설치가 된 상탭니다.
+# 로컬에kubectl설치 az aks install-cli 명령을 사용합니다
+# kubectl 확인
+kubectl get namespaces
+kubectl get nodes
+kubectl get pods
+kubectl get services
+kubectl get ingress
+kubectl get deployment
+
+
+## 애플리케이션 배포를 위해서 yaml파일을 하나 만들어 보겠습니다.
+## yaml파일에는 실행될 컨테이너를 포함해서
+## AKS 클러스터에 원하는 상태를 정의합니다. 
+## yaml 파일은 클라우드 서비스 인프라, software define infra의 주요 특징인
+## 애플리케이션을 선언적으로 정의하는 역할을 합니다.
+## 지금 만들어 볼 예제에서는 Azure Vote라고 아주아주 간단한 투표하는 웹앱인데요.
+## 이 웹앱을 구현하는데 필요한 모든 개체를 만드는 매니페스트가 yaml에 정의 되어 있습니다.
+## yaml에는 Azure Vote Python 응용 프로그램하나랑
+## Redis 인스턴스가 Kubernetes Deployment에 포함 되어 있습니다. 
+## 두 개의 Kubernetes Services가 만들어지고, Redis 인스턴스 구동 되고, 
+## 인터넷에서 Azure Vote 응용 프로그램에 액세스하기 위한 외부 서비스까지 구성됩니다.
+
+# 01.01_azure-vote.yaml
+=================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-vote-back
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azure-vote-back
+  template:
+    metadata:
+      labels:
+        app: azure-vote-back
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+      - name: azure-vote-back
+        image: mcr.microsoft.com/oss/bitnami/redis:6.0.8
+        env:
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        ports:
+        - containerPort: 6379
+          name: redis
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azure-vote-back
+spec:
+  ports:
+  - port: 6379
+  selector:
+    app: azure-vote-back
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: azure-vote-front
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: azure-vote-front
+  template:
+    metadata:
+      labels:
+        app: azure-vote-front
+    spec:
+      nodeSelector:
+        "kubernetes.io/os": linux
+      containers:
+      - name: azure-vote-front
+        image: mcr.microsoft.com/azuredocs/azure-vote-front:v1
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        ports:
+        - containerPort: 80
+        env:
+        - name: REDIS
+          value: "azure-vote-back"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: azure-vote-front
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+  selector:
+    app: azure-vote-front
+
+======================================
+
+## yaml로 잘 정의된 매니페스트 파일을
+## kubectl apply -f 명령을 사용해서 적용합니다.
+# kubectl apply로 yaml 적용
+kubectl apply -f ./yaml/01.01_azure-vote.yaml
+
+##응용 프로그램이 실행되면 
+## 웹 프런트 엔드를 인터넷에 노출시키는 Kubernetes 서비스가 만들어집니다. 
+## 진행상황을 kubeclt로 확인해보겠습니다.
+# kubectl 확인
+kubectl get namespaces
+kubectl get nodes
+kubectl get pods
+kubectl get services
+kubectl get ingress
+kubectl get deployment
+
+# 서비스 구동 확인
+kubectl describe service azure-vote-back
+kubectl describe pod azure-vote-back-554486c4c4-dkcnj
